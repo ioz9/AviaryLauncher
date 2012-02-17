@@ -4,6 +4,7 @@
 	<classpathentry kind="src" path="gen"/>
 	<classpathentry kind="con" path="com.android.ide.eclipse.adt.ANDROID_FRAMEWORK"/>
 	<classpathentry kind="con" path="com.android.ide.eclipse.adt.LIBRARIES"/>
-	<classpathentry kind="lib" path="/Users/alessandro/Downloads/android/android-sdk-macosx/extras/android/support/v4/android-support-v4.jar"/>
+	<classpathentry kind="lib" path="/AviaryFeather/libs/aviaryfeatherlibrary.jar"/>
+	<classpathentry kind="lib" path="/AviaryFeather/libs/android-support-v4.jar"/>
 	<classpathentry kind="output" path="bin/classes"/>
 </classpath>

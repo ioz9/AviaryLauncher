@@ -8,6 +8,7 @@ import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.ProgressDialog;
 import android.content.DialogInterface;
+import android.content.DialogInterface.OnCancelListener;
 import android.content.DialogInterface.OnClickListener;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
@@ -21,7 +22,6 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.Handler;
 import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore.Images;
 import android.provider.MediaStore.Images.ImageColumns;
@@ -51,14 +51,13 @@ public class MainActivity extends Activity {
 	private static final int EXTERNAL_STORAGE_UNAVAILABLE = 1;
 
 	public static final String LOG_TAG = "feather-launcher";
-	
+
 	/** apikey is required http://developers.aviary.com/ */
 	private static final String API_KEY = "xxxxx";
 
 	/** Folder name on the sdcard where the images will be saved **/
 	private static final String FOLDER_NAME = "aviary";
 
-	Handler mHandler = new Handler();
 	Button mGalleryButton;
 	Button mEditButton;
 	ImageView mImage;
@@ -67,7 +66,7 @@ public class MainActivity extends Activity {
 	Uri mImageUri;
 	int imageWidth, imageHeight;
 	private File mGalleryFolder;
-	
+
 	/** session id for the hi-res post processing */
 	private String mSessionId;
 
@@ -106,7 +105,7 @@ public class MainActivity extends Activity {
 				Uri uri = pickRandomImage();
 				if ( uri != null ) {
 					Log.d( LOG_TAG, "image uri: " + uri );
-					setImageURI( uri );
+					loadAsync( uri );
 				}
 			}
 		} );
@@ -116,7 +115,7 @@ public class MainActivity extends Activity {
 
 		mGalleryFolder = createFolders();
 	}
-	
+
 	@Override
 	protected void onResume() {
 		Log.i( LOG_TAG, "onResume" );
@@ -154,32 +153,21 @@ public class MainActivity extends Activity {
 
 	/**
 	 * Load the incoming Image
+	 * 
 	 * @param uri
 	 */
 	private void loadAsync( final Uri uri ) {
 
-		final Runnable r = new Runnable() {
+		Drawable toRecycle = mImage.getDrawable();
+		if ( toRecycle != null && toRecycle instanceof BitmapDrawable ) {
+			if ( ( (BitmapDrawable) mImage.getDrawable() ).getBitmap() != null )
+				( (BitmapDrawable) mImage.getDrawable() ).getBitmap().recycle();
+		}
+		mImage.setImageDrawable( null );
+		mImageUri = null;
 
-			@Override
-			public void run() {
-				int w = mImageContainer.getWidth();
-				Log.d( LOG_TAG, "width: " + w );
-				if ( w > 0 ) {
-					mHandler.post( new Runnable() {
-
-						@Override
-						public void run() {
-							setImageURI( uri );
-						}
-					} );
-				} else {
-					loadAsync( uri );
-				}
-			}
-		};
-
-		mHandler.post( r );
-
+		DownloadAsync task = new DownloadAsync();
+		task.execute( uri );
 	}
 
 	@Override
@@ -191,6 +179,7 @@ public class MainActivity extends Activity {
 
 	/**
 	 * Delete a file without throwing any exception
+	 * 
 	 * @param path
 	 * @return
 	 */
@@ -249,7 +238,7 @@ public class MainActivity extends Activity {
 	protected Dialog onCreateDialog( int id ) {
 		Dialog dialog = null;
 		switch ( id ) {
-			// external sdcard is not mounted!
+		// external sdcard is not mounted!
 			case EXTERNAL_STORAGE_UNAVAILABLE:
 				dialog = new AlertDialog.Builder( this ).setTitle( R.string.external_storage_na_title )
 						.setMessage( R.string.external_storage_na_message ).create();
@@ -275,7 +264,7 @@ public class MainActivity extends Activity {
 			switch ( requestCode ) {
 				case ACTION_REQUEST_GALLERY:
 					// user chose an image from the gallery
-					setImageURI( data.getData() );
+					loadAsync( data.getData() );
 					break;
 
 				case ACTION_REQUEST_FEATHER:
@@ -284,10 +273,9 @@ public class MainActivity extends Activity {
 					updateMedia( mOutputFilePath );
 
 					// update the preview with the result
-					if ( setImageURI( data.getData() ) ) {
-						onSaveCompleted( mOutputFilePath );
-						mOutputFilePath = null;
-					}
+					loadAsync( data.getData() );
+					onSaveCompleted( mOutputFilePath );
+					mOutputFilePath = null;
 					break;
 			}
 		} else if ( resultCode == RESULT_CANCELED ) {
@@ -296,8 +284,7 @@ public class MainActivity extends Activity {
 
 					// feather was cancelled without saving.
 					// we need to delete the entire session
-					if( null != mSessionId )
-						deleteSession( mSessionId );
+					if ( null != mSessionId ) deleteSession( mSessionId );
 
 					// delete the result file, if exists
 					if ( mOutputFilePath != null ) {
@@ -316,11 +303,11 @@ public class MainActivity extends Activity {
 	 *           lo-res file name ( in case we want to delete it )
 	 */
 	private void onSaveCompleted( final String filepath ) {
-		
-		if( mSessionId != null ){
-		
+
+		if ( mSessionId != null ) {
+
 			OnClickListener yesListener = new OnClickListener() {
-	
+
 				@Override
 				public void onClick( DialogInterface dialog, int which ) {
 					if ( null != mSessionId ) {
@@ -329,28 +316,28 @@ public class MainActivity extends Activity {
 					mSessionId = null;
 				}
 			};
-	
+
 			OnClickListener noListener = new OnClickListener() {
-	
+
 				@Override
 				public void onClick( DialogInterface dialog, int which ) {
-	
+
 					if ( null != mSessionId ) {
 						deleteSession( mSessionId );
 					}
-	
+
 					if ( !isFinishing() ) {
 						dialog.dismiss();
 					}
 					mSessionId = null;
 				}
 			};
-	
+
 			Dialog dialog = new AlertDialog.Builder( this ).setTitle( "HiRes" )
 					.setMessage( "A low-resolution image was created. Do you want to save the hi-res image too?" )
 					.setPositiveButton( android.R.string.yes, yesListener ).setNegativeButton( android.R.string.no, noListener )
 					.setCancelable( false ).create();
-	
+
 			dialog.show();
 		}
 	}
@@ -360,25 +347,11 @@ public class MainActivity extends Activity {
 	 * 
 	 * @param uri
 	 */
-	private boolean setImageURI( Uri uri ) {
+	private boolean setImageURI( final Uri uri, final Bitmap bitmap ) {
 
-		Drawable toRecycle = mImage.getDrawable();
-		if ( toRecycle != null && toRecycle instanceof BitmapDrawable ) {
-			if ( ( (BitmapDrawable) mImage.getDrawable() ).getBitmap() != null )
-				( (BitmapDrawable) mImage.getDrawable() ).getBitmap().recycle();
-		}
-
-		Bitmap bitmap;
-		try {
-			bitmap = ImageLoader.loadFromUri( this, uri, imageWidth, imageHeight, null );
-			Log.d( LOG_TAG, "image size: " + bitmap.getWidth() + "x" + bitmap.getHeight() );
-			mImage.setImageBitmap( bitmap );
-			mImage.setBackgroundDrawable( null );
-		} catch ( IOException e ) {
-			Toast.makeText( this, "Failed to load image " + uri, Toast.LENGTH_SHORT ).show();
-			e.printStackTrace();
-			return false;
-		}
+		Log.d( LOG_TAG, "image size: " + bitmap.getWidth() + "x" + bitmap.getHeight() );
+		mImage.setImageBitmap( bitmap );
+		mImage.setBackgroundDrawable( null );
 
 		mEditButton.setEnabled( true );
 		mImageUri = uri;
@@ -386,8 +359,7 @@ public class MainActivity extends Activity {
 	}
 
 	/**
-	 * We need to notify the MediaScanner when a new file is created.
-	 * In this way all the gallery applications will be notified too.
+	 * We need to notify the MediaScanner when a new file is created. In this way all the gallery applications will be notified too.
 	 * 
 	 * @param file
 	 */
@@ -501,10 +473,10 @@ public class MainActivity extends Activity {
 		newIntent.putExtra( "output-quality", 90 );
 
 		// If you want to disable the external effects
-		//newIntent.putExtra( "effect-enable-external-pack", false );
-		
+		// newIntent.putExtra( "effect-enable-external-pack", false );
+
 		// If you want to disable the external effects
-		//newIntent.putExtra( "stickers-enable-external-pack", false );		
+		// newIntent.putExtra( "stickers-enable-external-pack", false );
 
 		// enable fast rendering preview
 		// newIntent.putExtra( "effect-enable-fast-preview", true );
@@ -543,7 +515,7 @@ public class MainActivity extends Activity {
 		// You need to generate a new session id key to pass to Aviary feather
 		// this is the key used to operate with the hi-res image ( and must be unique for every new instance of Feather )
 		// The session-id key must be 64 char length
-		
+
 		mSessionId = StringUtils.getSha256( System.currentTimeMillis() + API_KEY );
 		Log.d( LOG_TAG, "session: " + mSessionId + ", size: " + mSessionId.length() );
 		newIntent.putExtra( "output-hires-session-id", mSessionId );
@@ -577,8 +549,8 @@ public class MainActivity extends Activity {
 	}
 
 	/**
-	 * Try to create the required folder on the sdcard where images
-	 * will be saved to.
+	 * Try to create the required folder on the sdcard where images will be saved to.
+	 * 
 	 * @return
 	 */
 	private File createFolders() {
@@ -607,7 +579,7 @@ public class MainActivity extends Activity {
 	 * 
 	 */
 	private void processHD( final String session_name ) {
-		
+
 		// get a new file for the hi-res file
 		File destination = getNextFileName();
 
@@ -621,17 +593,17 @@ public class MainActivity extends Activity {
 			Toast.makeText( this, e.getLocalizedMessage(), Toast.LENGTH_SHORT ).show();
 			return;
 		}
-		
+
 		String error = null;
 
 		// Now we need to fetch the session information from the content provider
 		FeatherContentProvider.SessionsDbColumns.Session session = null;
-		
+
 		Uri sessionUri = FeatherContentProvider.SessionsDbColumns.getContentUri( session_name );
-		
+
 		// this query will return a cursor with the informations about the given session
 		Cursor cursor = getContentResolver().query( sessionUri, null, null, null, null );
-		
+
 		if ( null != cursor ) {
 			session = FeatherContentProvider.SessionsDbColumns.Session.Create( cursor );
 			cursor.close();
@@ -639,19 +611,20 @@ public class MainActivity extends Activity {
 
 		if ( null != session ) {
 			// Print out the session informations
-			Log.d( LOG_TAG, "session.id: " + session.id );	// session _id
-			Log.d( LOG_TAG, "session.name: " + session.session );	// session name
-			Log.d( LOG_TAG, "session.ctime: " + session.ctime );	// creation time
-			Log.d( LOG_TAG, "session.file_name: " + session.file_name );	// original file, it is the same you passed in the startActivityForResult Intent
+			Log.d( LOG_TAG, "session.id: " + session.id ); // session _id
+			Log.d( LOG_TAG, "session.name: " + session.session ); // session name
+			Log.d( LOG_TAG, "session.ctime: " + session.ctime ); // creation time
+			Log.d( LOG_TAG, "session.file_name: " + session.file_name ); // original file, it is the same you passed in the
+																								// startActivityForResult Intent
 
 			// Now, based on the session information we need to retrieve
 			// the list of actions to apply to the hi-res image
 			Uri actionsUri = FeatherContentProvider.ActionsDbColumns.getContentUri( session.session );
-			
+
 			// this query will return the list of actions performed on the original file, during the FeatherActivity session.
 			// Now you can apply each action to the hi-res image to replicate the same result on the bigger image
 			cursor = getContentResolver().query( actionsUri, null, null, null, null );
-			
+
 			if ( null != cursor ) {
 				// If the cursor is valid we will start a new asynctask process to query the cursor
 				// and apply all the actions in a queue
@@ -663,8 +636,8 @@ public class MainActivity extends Activity {
 		} else {
 			error = "Failed to retrieve the session informations";
 		}
-		
-		if( null != error ){
+
+		if ( null != error ) {
 			Toast.makeText( this, error, Toast.LENGTH_LONG ).show();
 		}
 	}
@@ -682,8 +655,9 @@ public class MainActivity extends Activity {
 
 	/**
 	 * AsyncTask for Hi-Res image processing
+	 * 
 	 * @author alessandro
-	 *
+	 * 
 	 */
 	private class HDAsyncTask extends AsyncTask<Cursor, Integer, MoaHD.Error> {
 
@@ -693,10 +667,10 @@ public class MainActivity extends Activity {
 
 		/**
 		 * 
-		 * @param source 
-		 * 	- source image file
-		 * @param destination 
-		 * 	- destination image file
+		 * @param source
+		 *           - source image file
+		 * @param destination
+		 *           - destination image file
 		 */
 		public HDAsyncTask( Uri source, String destination ) {
 			mUri = source;
@@ -717,49 +691,48 @@ public class MainActivity extends Activity {
 		@Override
 		protected void onProgressUpdate( Integer... values ) {
 			super.onProgressUpdate( values );
-			//progress.setMax( values[1] );
-			//progress.setProgress( values[0] );
-			
+			// progress.setMax( values[1] );
+			// progress.setProgress( values[0] );
+
 			final int index = values[0];
 			final int total = values[1];
 			String message = "";
-			
-			if( index == 1 )
+
+			if ( index == 1 )
 				message = "Loading image...";
-			else if( index == total )
+			else if ( index == total )
 				message = "Saving image...";
 			else
-				message = "Applying action " + (index-1) + " of " + (total-2);
-			
+				message = "Applying action " + ( index - 1 ) + " of " + ( total - 2 );
+
 			progress.setMessage( message );
-			
+
 			Log.d( LOG_TAG, index + "/" + total + ", message: " + message );
 		}
 
 		@Override
 		protected Error doInBackground( Cursor... params ) {
 			Cursor cursor = params[0];
-			
+
 			MoaHD.Error result = Error.UnknownError;
 
 			if ( null != cursor ) {
 				if ( cursor.moveToFirst() ) {
-					
+
 					// Initialize the class to perform HD operations
 					MoaHD moa = new MoaHD();
-					
+
 					// get the total number of actions in the queue
 					// we're adding also the 'load' and the 'save' action to the total count
 					int total_actions = cursor.getCount() + 2;
 					int current_action = 1;
-					
+
 					// try to load the source image
 					// If load completes succesfully it will return MoaHD.Error.NoError
 					publishProgress( current_action++, total_actions );
-					
-					
+
 					final String srcPath = ImageLoader.getRealFilePath( MainActivity.this, mUri );
-					if( srcPath != null ){
+					if ( srcPath != null ) {
 						result = moa.load( srcPath );
 					} else {
 						ParcelFileDescriptor fd = null;
@@ -768,12 +741,12 @@ public class MainActivity extends Activity {
 						} catch ( FileNotFoundException e ) {
 							e.printStackTrace();
 						}
-						
-						if( null != fd ){
+
+						if ( null != fd ) {
 							result = moa.load( fd.getFd() );
 						}
 					}
-					
+
 					Log.d( LOG_TAG, "moa.load: " + result.name() );
 
 					if ( result == Error.NoError ) {
@@ -782,13 +755,13 @@ public class MainActivity extends Activity {
 						do {
 							// send a progress notification to the progressbar dialog
 							publishProgress( current_action++, total_actions );
-							
+
 							// load the action from the current cursor
 							Action action = Action.Create( cursor );
-							if( null != action )
-							{
-								Log.d( LOG_TAG, "executing: " + action.id + "(" + action.session_id + " on " + action.ctime + ") = " + action.getActions() );
-								
+							if ( null != action ) {
+								Log.d( LOG_TAG, "executing: " + action.id + "(" + action.session_id + " on " + action.ctime + ") = "
+										+ action.getActions() );
+
 								// apply a list of actions to the current image
 								moa.applyActions( action.getActions() );
 							} else {
@@ -798,21 +771,22 @@ public class MainActivity extends Activity {
 							// move the cursor to next position
 						} while ( cursor.moveToNext() );
 
-						// at the end of all the operations we need to save 
+						// at the end of all the operations we need to save
 						// the modified image to a new file
 						publishProgress( current_action++, total_actions );
 						result = moa.save( dstPath );
-						
+
 						Log.d( LOG_TAG, "moa.save: " + result.name() );
 
 						if ( result != Error.NoError ) {
 							Log.e( LOG_TAG, "failed to save the image to " + dstPath );
 						}
 
-						// and unload the current bitmap. Note that you *MUST* call this method to free the memory allocated with the load method
+						// and unload the current bitmap. Note that you *MUST* call this method to free the memory allocated with the load
+						// method
 						result = moa.unload();
 						Log.d( LOG_TAG, "moa.unload: " + result.name() );
-						
+
 						// finally dispose the moahd instance
 						moa.dispose();
 
@@ -865,5 +839,76 @@ public class MainActivity extends Activity {
 			// we don't need the session anymore, now we can delete it.
 			deleteSession( mSessionId );
 		}
+	}
+
+	class DownloadAsync extends AsyncTask<Uri, Void, Bitmap> implements OnCancelListener {
+
+		ProgressDialog mProgress;
+		private Uri mUri;
+
+		@Override
+		protected void onPreExecute() {
+			super.onPreExecute();
+
+			mProgress = new ProgressDialog( MainActivity.this );
+			mProgress.setIndeterminate( true );
+			mProgress.setCancelable( true );
+			mProgress.setMessage( "Loading image..." );
+			mProgress.setOnCancelListener( this );
+			mProgress.show();
+		}
+
+		@Override
+		protected Bitmap doInBackground( Uri... params ) {
+			mUri = params[0];
+			Bitmap bitmap = null;
+
+			while ( mImageContainer.getWidth() < 1 ) {
+				try {
+					Thread.sleep( 1 );
+				} catch ( InterruptedException e ) {
+					e.printStackTrace();
+				}
+			}
+
+			final int w = mImageContainer.getWidth();
+			Log.d( LOG_TAG, "width: " + w );
+
+			try {
+				bitmap = ImageLoader.loadFromUri( MainActivity.this, mUri, imageWidth, imageHeight, null );
+			} catch ( IOException e ) {
+				return null;
+			}
+
+			return bitmap;
+		}
+
+		@Override
+		protected void onPostExecute( Bitmap result ) {
+			super.onPostExecute( result );
+
+			if ( mProgress.getWindow() != null ) {
+				mProgress.dismiss();
+			}
+
+			if ( result != null ) {
+				setImageURI( mUri, result );
+			} else {
+				Toast.makeText( MainActivity.this, "Failed to load image " + mUri, Toast.LENGTH_SHORT ).show();
+			}
+		}
+
+		@Override
+		public void onCancel( DialogInterface dialog ) {
+			Log.i( LOG_TAG, "onProgressCancel" );
+			this.cancel( true );
+		}
+
+		@Override
+		protected void onCancelled() {
+			super.onCancelled();
+			Log.i( LOG_TAG, "onCancelled" );
+		}
+
 	}
 }
