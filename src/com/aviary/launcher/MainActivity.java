@@ -1,6 +1,7 @@
 package com.aviary.launcher;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -21,6 +22,7 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore.Images;
 import android.provider.MediaStore.Images.ImageColumns;
 import android.util.DisplayMetrics;
@@ -294,7 +296,8 @@ public class MainActivity extends Activity {
 
 					// feather was cancelled without saving.
 					// we need to delete the entire session
-					deleteSession( mSessionId );
+					if( null != mSessionId )
+						deleteSession( mSessionId );
 
 					// delete the result file, if exists
 					if ( mOutputFilePath != null ) {
@@ -313,39 +316,43 @@ public class MainActivity extends Activity {
 	 *           lo-res file name ( in case we want to delete it )
 	 */
 	private void onSaveCompleted( final String filepath ) {
-		OnClickListener yesListener = new OnClickListener() {
-
-			@Override
-			public void onClick( DialogInterface dialog, int which ) {
-				if ( null != mSessionId ) {
-					processHD( mSessionId );
+		
+		if( mSessionId != null ){
+		
+			OnClickListener yesListener = new OnClickListener() {
+	
+				@Override
+				public void onClick( DialogInterface dialog, int which ) {
+					if ( null != mSessionId ) {
+						processHD( mSessionId );
+					}
+					mSessionId = null;
 				}
-				mSessionId = null;
-			}
-		};
-
-		OnClickListener noListener = new OnClickListener() {
-
-			@Override
-			public void onClick( DialogInterface dialog, int which ) {
-
-				if ( null != mSessionId ) {
-					deleteSession( mSessionId );
+			};
+	
+			OnClickListener noListener = new OnClickListener() {
+	
+				@Override
+				public void onClick( DialogInterface dialog, int which ) {
+	
+					if ( null != mSessionId ) {
+						deleteSession( mSessionId );
+					}
+	
+					if ( !isFinishing() ) {
+						dialog.dismiss();
+					}
+					mSessionId = null;
 				}
-
-				if ( !isFinishing() ) {
-					dialog.dismiss();
-				}
-				mSessionId = null;
-			}
-		};
-
-		Dialog dialog = new AlertDialog.Builder( this ).setTitle( "HiRes" )
-				.setMessage( "A low-resolution image was created. Do you want to save the hi-res image too?" )
-				.setPositiveButton( android.R.string.yes, yesListener ).setNegativeButton( android.R.string.no, noListener )
-				.setCancelable( false ).create();
-
-		dialog.show();
+			};
+	
+			Dialog dialog = new AlertDialog.Builder( this ).setTitle( "HiRes" )
+					.setMessage( "A low-resolution image was created. Do you want to save the hi-res image too?" )
+					.setPositiveButton( android.R.string.yes, yesListener ).setNegativeButton( android.R.string.no, noListener )
+					.setCancelable( false ).create();
+	
+			dialog.show();
+		}
 	}
 
 	/**
@@ -536,6 +543,7 @@ public class MainActivity extends Activity {
 		// You need to generate a new session id key to pass to Aviary feather
 		// this is the key used to operate with the hi-res image ( and must be unique for every new instance of Feather )
 		// The session-id key must be 64 char length
+		
 		mSessionId = StringUtils.getSha256( System.currentTimeMillis() + API_KEY );
 		Log.d( LOG_TAG, "session: " + mSessionId + ", size: " + mSessionId.length() );
 		newIntent.putExtra( "output-hires-session-id", mSessionId );
@@ -645,16 +653,10 @@ public class MainActivity extends Activity {
 			cursor = getContentResolver().query( actionsUri, null, null, null, null );
 			
 			if ( null != cursor ) {
-				// resolve the absolute file path of the input image
-				String originalPath = ImageLoader.getRealFilePath( this, Uri.parse( session.file_name ) );
-				if( originalPath != null ){
-					// If the cursor is valid we will start a new asynctask process to query the cursor
-					// and apply all the actions in a queue
-					HDAsyncTask task = new HDAsyncTask( originalPath, destination.getAbsolutePath() );
-					task.execute( cursor );
-				} else {
-					error = "Cannot find the file path for " + session.file_name;
-				}
+				// If the cursor is valid we will start a new asynctask process to query the cursor
+				// and apply all the actions in a queue
+				HDAsyncTask task = new HDAsyncTask( Uri.parse( session.file_name ), destination.getAbsolutePath() );
+				task.execute( cursor );
 			} else {
 				error = "Failed to retrieve the list of actions!";
 			}
@@ -685,7 +687,8 @@ public class MainActivity extends Activity {
 	 */
 	private class HDAsyncTask extends AsyncTask<Cursor, Integer, MoaHD.Error> {
 
-		String srcPath, dstPath;
+		Uri mUri;
+		String dstPath;
 		ProgressDialog progress;
 
 		/**
@@ -695,8 +698,8 @@ public class MainActivity extends Activity {
 		 * @param destination 
 		 * 	- destination image file
 		 */
-		public HDAsyncTask( String source, String destination ) {
-			srcPath = source;
+		public HDAsyncTask( Uri source, String destination ) {
+			mUri = source;
 			dstPath = destination;
 		}
 
@@ -743,7 +746,7 @@ public class MainActivity extends Activity {
 				if ( cursor.moveToFirst() ) {
 					
 					// Initialize the class to perform HD operations
-					MoaHD moa = new MoaHD( srcPath, dstPath );
+					MoaHD moa = new MoaHD();
 					
 					// get the total number of actions in the queue
 					// we're adding also the 'load' and the 'save' action to the total count
@@ -753,7 +756,23 @@ public class MainActivity extends Activity {
 					// try to load the source image
 					// If load completes succesfully it will return MoaHD.Error.NoError
 					publishProgress( current_action++, total_actions );
-					result = moa.load();
+					
+					
+					final String srcPath = ImageLoader.getRealFilePath( MainActivity.this, mUri );
+					if( srcPath != null ){
+						result = moa.load( srcPath );
+					} else {
+						ParcelFileDescriptor fd = null;
+						try {
+							fd = getContentResolver().openFileDescriptor( mUri, "r" );
+						} catch ( FileNotFoundException e ) {
+							e.printStackTrace();
+						}
+						
+						if( null != fd ){
+							result = moa.load( fd.getFd() );
+						}
+					}
 					
 					Log.d( LOG_TAG, "moa.load: " + result.name() );
 
@@ -782,12 +801,12 @@ public class MainActivity extends Activity {
 						// at the end of all the operations we need to save 
 						// the modified image to a new file
 						publishProgress( current_action++, total_actions );
-						result = moa.save();
+						result = moa.save( dstPath );
 						
 						Log.d( LOG_TAG, "moa.save: " + result.name() );
 
 						if ( result != Error.NoError ) {
-							Log.e( LOG_TAG, "failed to save the image to " + moa.getOutputFilePath() );
+							Log.e( LOG_TAG, "failed to save the image to " + dstPath );
 						}
 
 						// and unload the current bitmap. Note that you *MUST* call this method to free the memory allocated with the load method
@@ -798,7 +817,7 @@ public class MainActivity extends Activity {
 						moa.dispose();
 
 					} else {
-						Log.e( LOG_TAG, "Failed to load file: " + moa.getInputFilePath() );
+						Log.e( LOG_TAG, "Failed to load file: " + srcPath );
 					}
 				}
 				cursor.close();
