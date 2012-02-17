@@ -735,15 +735,19 @@ public class MainActivity extends Activity {
 					if ( srcPath != null ) {
 						result = moa.load( srcPath );
 					} else {
-						ParcelFileDescriptor fd = null;
-						try {
-							fd = getContentResolver().openFileDescriptor( mUri, "r" );
-						} catch ( FileNotFoundException e ) {
-							e.printStackTrace();
-						}
-
-						if ( null != fd ) {
-							result = moa.load( fd.getFd() );
+						if( android.os.Build.VERSION.SDK_INT > 11 ){
+							ParcelFileDescriptor fd = null;
+							try {
+								fd = getContentResolver().openFileDescriptor( mUri, "r" );
+							} catch ( FileNotFoundException e ) {
+								e.printStackTrace();
+							}
+	
+							if ( null != fd ) {
+								result = moa.load( fd.getFd() );
+							}
+						} else {
+							result = Error.FileNotLoadedError;
 						}
 					}
 
