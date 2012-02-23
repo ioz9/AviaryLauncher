@@ -3,6 +3,7 @@ package com.aviary.launcher;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.InputStream;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -735,19 +736,35 @@ public class MainActivity extends Activity {
 					if ( srcPath != null ) {
 						result = moa.load( srcPath );
 					} else {
-						if( android.os.Build.VERSION.SDK_INT > 11 ){
+						
+						if( android.os.Build.VERSION.SDK_INT >= 11 && android.os.Build.VERSION.SDK_INT < 14 )
+						{
+							InputStream stream = null;
+							try {
+								stream = getContentResolver().openInputStream( mUri );
+							} catch( Exception e ){
+								result = Error.FileNotFoundError;
+								e.printStackTrace();
+							}
+							if( stream != null ){
+								try {
+									result = moa.load( stream );
+								} catch( Exception e ){
+									result = Error.DecodeError;
+								}
+							}
+						} else {
 							ParcelFileDescriptor fd = null;
 							try {
 								fd = getContentResolver().openFileDescriptor( mUri, "r" );
 							} catch ( FileNotFoundException e ) {
 								e.printStackTrace();
+								result = Error.FileNotFoundError;
 							}
 	
 							if ( null != fd ) {
-								result = moa.load( fd.getFd() );
+								result = moa.load( fd.getFileDescriptor() );
 							}
-						} else {
-							result = Error.FileNotLoadedError;
 						}
 					}
 
