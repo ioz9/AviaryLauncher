@@ -512,6 +512,9 @@ public class MainActivity extends Activity {
 		// the execution of Aviary we're saving the HI-RES image so we don't need a big
 		// image for the preview
 		newIntent.putExtra( "max-image-size", max_size );
+		
+		// Disable the default borders for the Effects panel
+		newIntent.putExtra( "effect-enable-borders", true );
 
 		// You need to generate a new session id key to pass to Aviary feather
 		// this is the key used to operate with the hi-res image ( and must be unique for every new instance of Feather )
