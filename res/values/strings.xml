@@ -14,4 +14,5 @@
     <string name="get_mobile_library">Get Android Library</string>
     <string name="view_documentation">View Documentation</string>
     <string name="hi_res_service_label">HI-RES Service</string>
+    <string name="crash_toast_text">Ooooops! I crashed, but a report has been sent to my developer to help him fix the issue!</string>
 </resources>
