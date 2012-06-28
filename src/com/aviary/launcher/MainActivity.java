@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Date;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -37,12 +38,14 @@ import android.widget.ImageView;
 import android.widget.Toast;
 import com.aviary.android.feather.FeatherActivity;
 import com.aviary.android.feather.R;
-import com.aviary.android.feather.library.filters.FilterLoaderFactory;
+import com.aviary.android.feather.library.media.ExifInterfaceWrapper;
 import com.aviary.android.feather.library.moa.MoaHD;
 import com.aviary.android.feather.library.moa.MoaHD.Error;
 import com.aviary.android.feather.library.providers.FeatherContentProvider;
 import com.aviary.android.feather.library.providers.FeatherContentProvider.ActionsDbColumns.Action;
-import com.aviary.android.feather.library.utils.ImageLoader;
+import com.aviary.android.feather.library.utils.DecodeUtils;
+import com.aviary.android.feather.library.utils.IOUtils;
+import com.aviary.android.feather.library.utils.ImageLoader.ImageSizes;
 import com.aviary.android.feather.library.utils.StringUtils;
 import com.aviary.android.feather.library.utils.SystemUtils;
 
@@ -74,6 +77,14 @@ public class MainActivity extends Activity {
 
 	@Override
 	protected void onCreate( Bundle savedInstanceState ) {
+		
+		Log.i( LOG_TAG, "device: " + android.os.Build.DEVICE );
+		Log.i( LOG_TAG, "cpu: " + android.os.Build.CPU_ABI );
+		Log.i( LOG_TAG, "cpu2: " + android.os.Build.CPU_ABI2 );
+		Log.i( LOG_TAG, "manufacter: " + android.os.Build.MANUFACTURER );
+		Log.i( LOG_TAG, "model: " + android.os.Build.MODEL );
+		Log.i( LOG_TAG, "product: " + android.os.Build.PRODUCT );
+		
 		Log.i( LOG_TAG, "onCreate" );
 		super.onCreate( savedInstanceState );
 		setContentView( R.layout.main );
@@ -159,6 +170,7 @@ public class MainActivity extends Activity {
 	 * @param uri
 	 */
 	private void loadAsync( final Uri uri ) {
+		Log.i( LOG_TAG, "loadAsync: " + uri );
 
 		Drawable toRecycle = mImage.getDrawable();
 		if ( toRecycle != null && toRecycle instanceof BitmapDrawable ) {
@@ -485,6 +497,8 @@ public class MainActivity extends Activity {
 
 		// you can force feather to display only a certain ( see FilterLoaderFactory#Filters )
 		// you can omit this if you just wanto to display the default tools
+		
+		/*
 		newIntent.putExtra( "tools-list",
 				new String[] {
 					FilterLoaderFactory.Filters.ENHANCE.name(), FilterLoaderFactory.Filters.EFFECTS.name(),
@@ -495,13 +509,21 @@ public class MainActivity extends Activity {
 					FilterLoaderFactory.Filters.TEXT.name(), FilterLoaderFactory.Filters.MEME.name(),
 					FilterLoaderFactory.Filters.RED_EYE.name(), FilterLoaderFactory.Filters.WHITEN.name(),
 					FilterLoaderFactory.Filters.BLEMISH.name(), } );
-
+		*/
+		
 		// you want the result bitmap inline. (optional)
 		// newIntent.putExtra( Constants.EXTRA_RETURN_DATA, true );
 
 		// you want to hide the exit alert dialog shown when back is pressed
 		// without saving image first
 		// newIntent.putExtra( Constants.EXTRA_HIDE_EXIT_UNSAVE_CONFIRMATION, true );
+		
+		// -- VIBRATION --
+		// Some aviary tools use the device vibration in order to give a better experience
+		// to the final user. But if you want to disable this feature, just pass
+		// any value with the key "tools-vibration-disabled" in the calling intent.
+		// This option has been added to version 2.1.5 of the Aviary SDK
+		// newIntent.putExtra( Constants.EXTRA_TOOLS_DISABLE_VIBRATION, true );
 
 		final DisplayMetrics metrics = new DisplayMetrics();
 		getWindowManager().getDefaultDisplay().getMetrics( metrics );
@@ -672,6 +694,7 @@ public class MainActivity extends Activity {
 		String dstPath_;
 		ProgressDialog progress_;
 		String session_;
+		ExifInterfaceWrapper exif_;
 
 		/**
 		 * Initialize the HiRes async task
@@ -772,6 +795,12 @@ public class MainActivity extends Activity {
 					if ( result != Error.NoError ) {
 						Log.e( LOG_TAG, "failed to save the image to " + dstPath_ );
 					}
+					
+					// ok, now we can save the source image EXIF tags
+					// to the new image
+					if( null != exif_ ){
+						saveExif( exif_, dstPath_ );
+					}
 
 
 				} else {
@@ -789,6 +818,32 @@ public class MainActivity extends Activity {
 			}
 			
 			return result;
+		}
+		
+		private void saveExif( ExifInterfaceWrapper originalExif, String filename ){
+			// ok, now we can save back the EXIF tags
+			// to the new file
+			ExifInterfaceWrapper newExif = null;
+			try {
+				newExif = new ExifInterfaceWrapper( dstPath_ );
+			} catch ( IOException e ) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			if( null != newExif && null != originalExif ){
+				originalExif.copyTo( newExif );
+				// this should be changed because the editor rotate the image pixels
+				newExif.setAttribute( ExifInterfaceWrapper.TAG_ORIENTATION, "0" );
+				// let's update the software tag too
+				newExif.setAttribute( ExifInterfaceWrapper.TAG_SOFTWARE, "Aviary " + FeatherActivity.SDK_VERSION );
+				// ...and the modification date
+				newExif.setAttribute( ExifInterfaceWrapper.TAG_DATETIME, ExifInterfaceWrapper.getExifFormattedDate( new Date() ) );						
+				try {
+					newExif.saveAttributes();
+				} catch ( IOException e ) {
+					e.printStackTrace();
+				}
+			}
 		}
 
 		@Override
@@ -835,8 +890,16 @@ public class MainActivity extends Activity {
 
 		private Error loadImage( MoaHD moa ) {
 			MoaHD.Error result = Error.UnknownError;
-			final String srcPath = ImageLoader.getRealFilePath( MainActivity.this, uri_ );
+			final String srcPath = IOUtils.getRealFilePath( MainActivity.this, uri_ );
 			if ( srcPath != null ) {
+				
+				// Let's try to load the EXIF tags from
+				// the source image
+				try {
+					exif_ = new ExifInterfaceWrapper( srcPath );
+				} catch ( IOException e ) {
+					e.printStackTrace();
+				}
 				result = moa.load( srcPath );
 			} else {
 
@@ -907,13 +970,8 @@ public class MainActivity extends Activity {
 
 			final int w = mImageContainer.getWidth();
 			Log.d( LOG_TAG, "width: " + w );
-
-			try {
-				bitmap = ImageLoader.loadFromUri( MainActivity.this, mUri, imageWidth, imageHeight, null );
-			} catch ( IOException e ) {
-				return null;
-			}
-
+			ImageSizes sizes = new ImageSizes();
+			bitmap = DecodeUtils.decode( MainActivity.this, mUri, imageWidth, imageHeight, sizes );
 			return bitmap;
 		}
 
