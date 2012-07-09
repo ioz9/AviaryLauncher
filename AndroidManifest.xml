@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.aviary.launcher"
-    android:versionCode="59"
-    android:versionName="2.1.3" >
+    android:versionCode="65"
+    android:versionName="2.1.5" >
 
     <uses-sdk
         android:minSdkVersion="10"
@@ -67,6 +67,14 @@
             android:largeHeap="true"
             android:screenOrientation="unspecified"
             android:theme="@style/FeatherDefaultTheme.Custom" />
+        
+        <!-- image info activity -->
+        <activity 
+            android:name=".ImageInfoActivity"
+            android:label="@string/image_details"
+            android:noHistory="true"
+            android:launchMode="singleTop"
+            android:theme="@style/FeatherDefaultTheme.Dialog" />        
 
         <!-- receiver. gets the newly installed plugins -->
         <receiver

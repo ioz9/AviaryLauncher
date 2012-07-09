@@ -29,10 +29,13 @@ import android.provider.MediaStore.Images;
 import android.provider.MediaStore.Images.ImageColumns;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.view.ContextMenu;
+import android.view.ContextMenu.ContextMenuInfo;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
+import android.view.View.OnLongClickListener;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.Toast;
@@ -77,14 +80,14 @@ public class MainActivity extends Activity {
 
 	@Override
 	protected void onCreate( Bundle savedInstanceState ) {
-		
+
 		Log.i( LOG_TAG, "device: " + android.os.Build.DEVICE );
 		Log.i( LOG_TAG, "cpu: " + android.os.Build.CPU_ABI );
 		Log.i( LOG_TAG, "cpu2: " + android.os.Build.CPU_ABI2 );
 		Log.i( LOG_TAG, "manufacter: " + android.os.Build.MANUFACTURER );
 		Log.i( LOG_TAG, "model: " + android.os.Build.MODEL );
 		Log.i( LOG_TAG, "product: " + android.os.Build.PRODUCT );
-		
+
 		Log.i( LOG_TAG, "onCreate" );
 		super.onCreate( savedInstanceState );
 		setContentView( R.layout.main );
@@ -123,10 +126,25 @@ public class MainActivity extends Activity {
 			}
 		} );
 
+		mImageContainer.setLongClickable( true );
+		mImageContainer.setOnLongClickListener( new OnLongClickListener() {
+
+			@Override
+			public boolean onLongClick( View v ) {
+				if ( mImageUri != null ) {
+					Log.d( LOG_TAG, "onLongClick: " + v );
+					openContextMenu( v );
+					return true;
+				}
+				return false;
+			}
+		} );
+
 		Toast.makeText( this, "launcher: " + getLibraryVersion() + ", sdk: " + FeatherActivity.SDK_VERSION, Toast.LENGTH_SHORT )
 				.show();
 
 		mGalleryFolder = createFolders();
+		registerForContextMenu( mImageContainer );
 	}
 
 	@Override
@@ -138,6 +156,26 @@ public class MainActivity extends Activity {
 			handleIntent( getIntent() );
 			setIntent( new Intent() );
 		}
+	}
+
+	@Override
+	public void onCreateContextMenu( ContextMenu menu, View v, ContextMenuInfo menuInfo ) {
+		super.onCreateContextMenu( menu, v, menuInfo );
+		menu.setHeaderTitle( "Menu" );
+		menu.add( 0, 0, 0, "Details" );
+	}
+
+	@Override
+	public boolean onContextItemSelected( MenuItem item ) {
+
+		final int order = item.getOrder();
+		switch ( order ) {
+			case 0:
+				showCurrentImageDetails();
+				return true;
+		}
+
+		return super.onContextItemSelected( item );
 	}
 
 	/**
@@ -189,6 +227,28 @@ public class MainActivity extends Activity {
 		Log.i( LOG_TAG, "onDestroy" );
 		super.onDestroy();
 		mOutputFilePath = null;
+	}
+
+	/**
+	 * Load the image details and pass the result
+	 * to the {@link ImageInfoActivity} activity
+	 */
+	private void showCurrentImageDetails() {
+		if ( null != mImageUri ) {
+			ImageInfo info;
+			try {
+				info = new ImageInfo( this, mImageUri );
+			} catch ( IOException e ) {
+				e.printStackTrace();
+				return;
+			}
+
+			if ( null != info ) {
+				Intent intent = new Intent( this, ImageInfoActivity.class );
+				intent.putExtra( "image-info", info );
+				startActivity( intent );
+			}
+		}
 	}
 
 	/**
@@ -497,27 +557,26 @@ public class MainActivity extends Activity {
 
 		// you can force feather to display only a certain ( see FilterLoaderFactory#Filters )
 		// you can omit this if you just wanto to display the default tools
-		
+
 		/*
-		newIntent.putExtra( "tools-list",
-				new String[] {
-					FilterLoaderFactory.Filters.ENHANCE.name(), FilterLoaderFactory.Filters.EFFECTS.name(),
-					FilterLoaderFactory.Filters.STICKERS.name(), FilterLoaderFactory.Filters.ADJUST.name(),
-					FilterLoaderFactory.Filters.CROP.name(), FilterLoaderFactory.Filters.BRIGHTNESS.name(),
-					FilterLoaderFactory.Filters.CONTRAST.name(), FilterLoaderFactory.Filters.SATURATION.name(),
-					FilterLoaderFactory.Filters.SHARPNESS.name(), FilterLoaderFactory.Filters.DRAWING.name(),
-					FilterLoaderFactory.Filters.TEXT.name(), FilterLoaderFactory.Filters.MEME.name(),
-					FilterLoaderFactory.Filters.RED_EYE.name(), FilterLoaderFactory.Filters.WHITEN.name(),
-					FilterLoaderFactory.Filters.BLEMISH.name(), } );
-		*/
-		
+		 * newIntent.putExtra( "tools-list", new String[] { FilterLoaderFactory.Filters.ENHANCE.name(),
+		 * FilterLoaderFactory.Filters.EFFECTS.name(), FilterLoaderFactory.Filters.STICKERS.name(),
+		 * FilterLoaderFactory.Filters.ADJUST.name(), FilterLoaderFactory.Filters.CROP.name(),
+		 * FilterLoaderFactory.Filters.BRIGHTNESS.name(), FilterLoaderFactory.Filters.CONTRAST.name(),
+		 * FilterLoaderFactory.Filters.SATURATION.name(), FilterLoaderFactory.Filters.SHARPNESS.name(),
+		 * FilterLoaderFactory.Filters.DRAWING.name(), FilterLoaderFactory.Filters.TEXT.name(),
+		 * FilterLoaderFactory.Filters.MEME.name(), FilterLoaderFactory.Filters.RED_EYE.name(),
+		 * FilterLoaderFactory.Filters.WHITEN.name(), FilterLoaderFactory.Filters.BLEMISH.name(),
+		 * FilterLoaderFactory.Filters.COLORTEMP.name(), } );
+		 */
+
 		// you want the result bitmap inline. (optional)
 		// newIntent.putExtra( Constants.EXTRA_RETURN_DATA, true );
 
 		// you want to hide the exit alert dialog shown when back is pressed
 		// without saving image first
 		// newIntent.putExtra( Constants.EXTRA_HIDE_EXIT_UNSAVE_CONFIRMATION, true );
-		
+
 		// -- VIBRATION --
 		// Some aviary tools use the device vibration in order to give a better experience
 		// to the final user. But if you want to disable this feature, just pass
@@ -534,7 +593,7 @@ public class MainActivity extends Activity {
 		// Here we're passing the current display size as max image size because after
 		// the execution of Aviary we're saving the HI-RES image so we don't need a big
 		// image for the preview
-		newIntent.putExtra( "max-image-size", max_size );
+		newIntent.putExtra( "max-image-size", (int) ( (double) max_size / 0.8 ) );
 
 		// Enable/disable the default borders for the effects
 		newIntent.putExtra( "effect-enable-borders", true );
@@ -606,7 +665,7 @@ public class MainActivity extends Activity {
 	 * 
 	 */
 	private void processHD( final String session_name ) {
-		
+
 		Log.i( LOG_TAG, "processHD: " + session_name );
 
 		// get a new file for the hi-res file
@@ -699,9 +758,12 @@ public class MainActivity extends Activity {
 		/**
 		 * Initialize the HiRes async task
 		 * 
-		 * @param source - source image file
-		 * @param destination - destination image file
-		 * @param session_id - the session id used to retrieve the list of actions 
+		 * @param source
+		 *           - source image file
+		 * @param destination
+		 *           - destination image file
+		 * @param session_id
+		 *           - the session id used to retrieve the list of actions
 		 */
 		public HDAsyncTask( Uri source, String destination, String session_id ) {
 			uri_ = source;
@@ -715,7 +777,7 @@ public class MainActivity extends Activity {
 			progress_ = new ProgressDialog( MainActivity.this );
 			progress_.setIndeterminate( true );
 			progress_.setTitle( "Processing Hi-res image" );
-			progress_.setMessage("Loading image...");
+			progress_.setMessage( "Loading image..." );
 			progress_.setProgressStyle( ProgressDialog.STYLE_SPINNER );
 			progress_.setCancelable( false );
 			progress_.show();
@@ -744,7 +806,7 @@ public class MainActivity extends Activity {
 			Cursor cursor = params[0];
 
 			MoaHD.Error result = Error.UnknownError;
-			
+
 			if ( null != cursor ) {
 
 				// Initialize the class to perform HD operations
@@ -756,9 +818,9 @@ public class MainActivity extends Activity {
 
 				// if image is loaded
 				if ( result == Error.NoError ) {
-					
+
 					final int total_actions = cursor.getCount();
-					
+
 					if ( cursor.moveToFirst() ) {
 
 						// get the total number of actions in the queue
@@ -795,32 +857,37 @@ public class MainActivity extends Activity {
 					if ( result != Error.NoError ) {
 						Log.e( LOG_TAG, "failed to save the image to " + dstPath_ );
 					}
-					
+
 					// ok, now we can save the source image EXIF tags
 					// to the new image
-					if( null != exif_ ){
+					if ( null != exif_ ) {
 						saveExif( exif_, dstPath_ );
 					}
-
 
 				} else {
 					Log.e( LOG_TAG, "Failed to load file" );
 				}
 				cursor.close();
-				
+
 				// and unload the current bitmap. Note that you *MUST* call this method to free the memory allocated with the load
 				// method
 				result = moa.unload();
 				Log.d( LOG_TAG, "moa.unload: " + result.name() );
-				
+
 				// finally dispose the moahd instance
 				moa.dispose();
 			}
-			
+
 			return result;
 		}
-		
-		private void saveExif( ExifInterfaceWrapper originalExif, String filename ){
+
+		/**
+		 * Save the Exif tags to the new image
+		 * 
+		 * @param originalExif
+		 * @param filename
+		 */
+		private void saveExif( ExifInterfaceWrapper originalExif, String filename ) {
 			// ok, now we can save back the EXIF tags
 			// to the new file
 			ExifInterfaceWrapper newExif = null;
@@ -830,14 +897,14 @@ public class MainActivity extends Activity {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
-			if( null != newExif && null != originalExif ){
+			if ( null != newExif && null != originalExif ) {
 				originalExif.copyTo( newExif );
-				// this should be changed because the editor rotate the image pixels
+				// this should be changed because the editor already rotate the image
 				newExif.setAttribute( ExifInterfaceWrapper.TAG_ORIENTATION, "0" );
 				// let's update the software tag too
 				newExif.setAttribute( ExifInterfaceWrapper.TAG_SOFTWARE, "Aviary " + FeatherActivity.SDK_VERSION );
 				// ...and the modification date
-				newExif.setAttribute( ExifInterfaceWrapper.TAG_DATETIME, ExifInterfaceWrapper.getExifFormattedDate( new Date() ) );						
+				newExif.setAttribute( ExifInterfaceWrapper.TAG_DATETIME, ExifInterfaceWrapper.getExifFormattedDate( new Date() ) );
 				try {
 					newExif.saveAttributes();
 				} catch ( IOException e ) {
@@ -892,7 +959,7 @@ public class MainActivity extends Activity {
 			MoaHD.Error result = Error.UnknownError;
 			final String srcPath = IOUtils.getRealFilePath( MainActivity.this, uri_ );
 			if ( srcPath != null ) {
-				
+
 				// Let's try to load the EXIF tags from
 				// the source image
 				try {

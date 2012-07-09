@@ -13,4 +13,10 @@
 	-->
 	
 	</style>
+	
+	
+	<style name="FeatherDefaultTheme.Dialog" parent="android:Theme.Dialog">
+	    <item name="dialog_layout">@null</item>
+	    <item name="dialog_button">@android:style/Widget.Button</item>
+	</style>	
 </resources>
